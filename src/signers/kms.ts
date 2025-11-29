@@ -1,5 +1,5 @@
 import { KMSClient, GetPublicKeyCommand, SignCommand } from '@aws-sdk/client-kms';
-import { Provider, TransactionRequest, keccak256, getBytes, Transaction, resolveAddress } from 'ethers';
+import { Provider, TransactionRequest, keccak256, getBytes, Transaction } from 'ethers';
 import { BaseSigner } from './base';
 import {
   derEncodedPublicKeyToEthAddress,
@@ -147,7 +147,7 @@ export class KMSSigner extends BaseSigner {
     };
 
     // Create unsigned transaction
-    const unsignedTx = Transaction.from(resolvedTx);
+    const unsignedTx = Transaction.from(tx);
     const unsignedSerialized = unsignedTx.unsignedSerialized;
 
     // Hash the unsigned transaction

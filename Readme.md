@@ -1,17 +1,15 @@
-# Avantis Trader SDK
+# Avantis Trader SDK - TypeScript
 
-A comprehensive TypeScript SDK for interacting with the Avantis decentralized leveraged trading platform on Base network.
+A comprehensive TypeScript SDK for interacting with the Avantis decentralized leveraged trading platform. This SDK enables developers to access real-time price feeds, retrieve asset parameters, integrate price updates into trading systems, and execute trades on the Avantis platform.
 
 ## Features
 
-- 🔐 **Multiple Signer Support**: Local wallet and AWS KMS signers
-- 📊 **Trading Operations**: Open, close, and manage leveraged positions
-- 🤝 **Delegation**: Allow other addresses to trade on your behalf
-- 🎁 **Referral System**: Set and manage referral codes for fee discounts
-- 📈 **Market Data**: Real-time price feeds via WebSocket
-- 🔍 **Advanced Queries**: Price impact, fees, liquidity depth calculations
-- ⚡ **Multicall**: Batch multiple contract calls for efficiency
-- 🛡️ **Type Safety**: Full TypeScript support with Zod validation
+- **Complete Trading Lifecycle**: Open, close, modify, and manage perpetual positions
+- **Real-time Price Feeds**: WebSocket integration with Pyth Network for live price updates
+- **Market Data**: Access open interest, utilization, skew, fees, and liquidity depth
+- **Flexible Signing**: Support for local private keys and AWS KMS for secure transaction signing
+- **Type-Safe**: Full TypeScript support with Zod validation
+- **Modular Architecture**: Clean separation of concerns with RPC modules
 
 ## Installation
 
@@ -19,229 +17,347 @@ A comprehensive TypeScript SDK for interacting with the Avantis decentralized le
 npm install avantis-trader-sdk
 ```
 
+Or with yarn:
+
+```bash
+yarn add avantis-trader-sdk
+```
+
 ## Quick Start
 
 ```typescript
-import { TraderClient, TradeInputOrderType } from 'avantis-trader-sdk';
+import { TraderClient, TradeInput, TradeInputOrderType } from 'avantis-trader-sdk';
 
 // Initialize client
-const client = new TraderClient('https://mainnet.base.org');
+const client = new TraderClient('https://your-rpc-endpoint.com');
 
-// Set signer
+// Set up signer
 client.setLocalSigner('your-private-key');
 
+// Get market snapshot
+const snapshot = await client.snapshotRPC.getSnapshot();
+
 // Open a trade
-const trade = {
-  trader: await client.signer.getAddress(),
-  pairIndex: 0, // BTC/USD
-  index: 0,
-  initialPosToken: 100, // 100 USDC collateral
-  positionSizeUSDC: 100,
-  openPrice: 50000,
-  buy: true, // Long position
-  leverage: 10, // 10x leverage
-  tp: 55000, // Take profit
-  sl: 48000, // Stop loss
+const tradeInput: TradeInput = {
+  pair: 'BTC/USD',
+  isLong: true,
+  collateralInTrade: 100,
+  leverage: 10,
+  openPrice: 0, // Market order
+  tp: 0,
+  sl: 0,
+  orderType: TradeInputOrderType.MARKET,
+  maxSlippageP: 1,
 };
 
-const receipt = await client.tradingOps.openTrade(
-  trade,
-  TradeInputOrderType.MARKET,
-  1 // 1% slippage
+const tradeTx = await client.tradeRPC.buildTradeOpenTx(tradeInput);
+const receipt = await client.signAndGetReceipt(tradeTx);
+console.log('Trade executed:', receipt?.hash);
+```
+
+## Architecture
+
+### Main Components
+
+#### TraderClient
+Main entry point for interacting with Avantis smart contracts. Provides access to all RPC modules and handles transaction signing.
+
+```typescript
+const client = new TraderClient(
+  providerUrl: string,
+  signer?: BaseSigner,
+  feedClient?: FeedClient
 );
 ```
 
-## Contract Addresses (Base Mainnet)
+#### Signers
 
-The SDK is pre-configured with the following contract addresses:
+**LocalSigner** - Sign transactions with a private key:
+```typescript
+client.setLocalSigner('0x...');
+```
 
-- **TradingStorage**: `0x8a311D7048c35985aa31C131B9A13e03a5f7422d`
-- **PairStorage**: `0x5db3772136e5557EFE028Db05EE95C84D76faEC4`
-- **PairInfos**: `0x81F22d0Cc22977c91bEfE648C9fddf1f2bd977e5`
-- **PriceAggregator**: `0x64e2625621970F8cfA17B294670d61CB883dA511`
-- **USDC**: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
-- **Trading**: `0x44914408af82bC9983bbb330e3578E1105e11d4e`
-- **Multicall**: `0xb7125506Ff25211c4C51DFD8DdED00BE6Fa8Cbf7`
-- **Referral**: `0x1A110bBA13A1f16cCa4b79758BD39290f29De82D`
+**KMSSigner** - Sign transactions with AWS KMS (private key never leaves HSM):
+```typescript
+client.setAwsKmsSigner('kms-key-id', 'us-east-1');
+```
 
-## Core Modules
+**Custom Signer** - Implement `BaseSigner` for custom signing logic:
+```typescript
+class CustomSigner extends BaseSigner {
+  async signTransaction(tx: TransactionRequest): Promise<string> {
+    // Your custom signing logic
+  }
+  async getAddress(): Promise<string> {
+    // Return address
+  }
+}
+```
 
-### Trading Operations
+#### FeedClient
+WebSocket client for real-time price feeds from Pyth Network:
 
-Execute trades and manage positions:
+```typescript
+import { FeedClient } from 'avantis-trader-sdk';
+
+const feedClient = new FeedClient();
+
+feedClient.registerPriceFeedCallback(feedId, (priceData) => {
+  console.log('Price update:', priceData);
+});
+
+await feedClient.listenForPriceUpdates();
+```
+
+### RPC Modules
+
+#### PairsCache
+Manages trading pair information with caching:
+
+```typescript
+// Get all pairs
+const pairs = await client.pairsCache.getPairsInfo();
+
+// Get pair by name
+const pairIndex = await client.pairsCache.getPairIndex('BTC/USD');
+
+// Get pairs in a category
+const pairsInGroup = await client.pairsCache.getPairsInGroup(0);
+```
+
+#### AssetParametersRPC
+Retrieve asset-level parameters:
+
+```typescript
+// Get open interest
+const oi = await client.assetParams.getOI();
+
+// Get utilization
+const utilization = await client.assetParams.getUtilization();
+
+// Get asset skew
+const skew = await client.assetParams.getAssetSkew();
+
+// Get price impact
+const impact = await client.assetParams.getPriceImpactSpread(
+  positionSize,
+  isLong,
+  pairIndex
+);
+```
+
+#### CategoryParametersRPC
+Retrieve category-level parameters (grouped pairs):
+
+```typescript
+// Get category OI
+const categoryOI = await client.categoryParams.getOI();
+
+// Get category utilization
+const categoryUtil = await client.categoryParams.getUtilization();
+
+// Get category skew
+const categorySkew = await client.categoryParams.getCategorySkew();
+```
+
+#### FeeParametersRPC
+Fee calculations:
+
+```typescript
+// Get margin fees
+const fees = await client.feeParams.getMarginFee();
+
+// Get opening fee
+const openingFee = await client.feeParams.getOpeningFee(
+  positionSize,
+  isLong,
+  pairIndex
+);
+
+// Get fee with referral discount
+const feeWithReferral = await client.feeParams.getNewTradeOpeningFee(
+  tradeInput,
+  referrerAddress
+);
+```
+
+#### TradingParametersRPC
+Trading-related parameters:
+
+```typescript
+// Get loss protection info
+const lossProtection = await client.tradingParams.getLossProtectionInfo(
+  tradeInput,
+  openingFee
+);
+```
+
+#### BlendedRPC
+Blended calculations (25% asset + 75% category):
+
+```typescript
+// Get blended utilization
+const blendedUtil = await client.blendedParams.getBlendedUtilization();
+
+// Get blended skew
+const blendedSkew = await client.blendedParams.getBlendedSkew();
+```
+
+#### TradeRPC
+Trading operations:
 
 ```typescript
 // Open trade
-await client.tradingOps.openTrade(trade, orderType, slippage);
+const openTx = await client.tradeRPC.buildTradeOpenTx(tradeInput);
 
 // Close trade
-await client.tradingOps.closeTradeMarket(pairIndex, tradeIndex, amount);
-
-// Update TP/SL
-await client.tradingOps.updateTpAndSl(pairIndex, tradeIndex, newSl, newTp);
+const closeTx = await client.tradeRPC.buildTradeCloseTx(pairIndex, tradeIndex);
 
 // Update margin
-await client.tradingOps.updateMargin(pairIndex, tradeIndex, updateType, amount);
-
-// Cancel limit order
-await client.tradingOps.cancelOpenLimitOrder(pairIndex, orderIndex);
-
-// Query trades
-const trade = await client.tradingOps.getOpenTrade(trader, pairIndex, index);
-const count = await client.tradingOps.getOpenTradesCount(trader, pairIndex);
-```
-
-### Delegation
-
-Allow trusted addresses to trade on your behalf:
-
-```typescript
-// Set delegate
-await client.delegation.setDelegate(delegateAddress);
-
-// Check delegate
-const delegate = await client.delegation.getDelegateFor(ownerAddress);
-
-// Execute delegated action
-const callData = client.delegation.encodeUpdateTpAndSl(...);
-await client.delegation.delegatedAction(traderAddress, callData, value);
-
-// Remove delegate
-await client.delegation.removeDelegate();
-```
-
-### Referral System
-
-Manage referral codes and earn fee discounts:
-
-```typescript
-// Set referral code
-await client.referral.setReferralCode('MYCODE');
-
-// Get referral info
-const info = await client.referral.getTraderReferralInfo(address);
-
-// Get tier info
-const tier = await client.referral.getReferrerTier(address);
-const tierInfo = await client.referral.getTierInfo(tier);
-
-// Calculate discount
-const discount = await client.referral.getTraderReferralDiscount(address, fee);
-```
-
-### Pair Info Queries
-
-Get detailed market information:
-
-```typescript
-// Price impact and spread
-const impact = await client.pairInfoQueries.getPriceImpactSpread(pairIndex, isLong, size, isOpen);
-const skew = await client.pairInfoQueries.getSkewImpactSpread(pairIndex, isLong, size, isOpen);
-
-// Fees
-const feeUsdc = await client.pairInfoQueries.getOpenFeeUsdc(pairIndex, size, isLong);
-const feeP = await client.pairInfoQueries.getOpenFeeP(pairIndex, size, isLong);
-
-// Loss protection
-const tier = await client.pairInfoQueries.getLossProtectionTierForSize(pairIndex, size);
-const protection = await client.pairInfoQueries.getLossProtectionP(pairIndex, tier);
-
-// Liquidity depth
-const depth = await client.pairInfoQueries.getDepth(pairIndex);
-```
-
-### Multicall
-
-Batch multiple queries efficiently:
-
-```typescript
-// Batch read trades
-const trades = await client.multicall.batchGetOpenTrades(
-  tradingStorage,
-  trader,
+const marginTx = await client.tradeRPC.buildTradeMarginUpdateTx(
   pairIndex,
-  [0, 1, 2]
+  tradeIndex,
+  marginDelta,
+  MarginUpdateType.DEPOSIT
 );
 
-// Batch read pair info
-const pairs = await client.multicall.batchGetPairs(pairStorage, [0, 1, 2, 3]);
+// Update TP/SL
+const tpSlTx = await client.tradeRPC.buildTradeTpSlUpdateTx(
+  pairIndex,
+  tradeIndex,
+  newTp,
+  newSl
+);
 
-// Custom multicall
-const result = await client.multicall.aggregateAndDecode([
-  { contract: pairInfos, functionName: 'onePercentDepthAboveUsdc', args: [0] },
-  { contract: tradingStorage, functionName: 'openInterestUsdc', args: [0, 0] },
-]);
+// Cancel order
+const cancelTx = await client.tradeRPC.buildOrderCancelTx(pairIndex, orderIndex);
+
+// Get all trades
+const trades = await client.tradeRPC.getTrades(traderAddress);
 ```
 
-## Decimal Precision
-
-The SDK handles different decimal precisions:
-
-- **USDC amounts**: 6 decimals
-- **Prices**: 10 decimals
-- **Percentages/Leverage**: 10 decimals
-- **Fees**: 12 decimals
-- **ETH/Execution fees**: 18 decimals
-
-Helper functions:
-```typescript
-import { toBlockchain6, fromBlockchain6, toBlockchain10, fromBlockchain10 } from 'avantis-trader-sdk';
-
-// Convert to blockchain format
-const usdcAmount = toBlockchain6(100); // 100 USDC -> 100000000
-const price = toBlockchain10(50000); // $50,000 -> 500000000000000
-
-// Convert from blockchain format
-const usdc = fromBlockchain6(100000000); // -> 100
-const priceNum = fromBlockchain10(500000000000000); // -> 50000
-```
-
-## Optimized Snapshot
-
-The SDK includes an optimized snapshot implementation that uses `getPairBackend()` to reduce contract calls:
+#### SnapshotRPC
+Aggregate all market data:
 
 ```typescript
-// Get optimized market snapshot
+// Get complete market snapshot
 const snapshot = await client.snapshotRPC.getSnapshot();
 
-// Get full backend data for advanced use cases
-const fullData = await client.snapshotRPC.getPairFullData(0);
-const allData = await client.snapshotRPC.getAllPairsFullData();
+// Get group snapshot
+const groupData = await client.snapshotRPC.getGroupSnapshot(groupIndex);
+
+// Get pair snapshot
+const pairData = await client.snapshotRPC.getPairSnapshot('BTC/USD');
 ```
 
-**Benefits:**
-- 40% fewer RPC calls by consolidating static config data
-- Complete pair configuration in single call
-- Better caching opportunities for static vs dynamic data
-- Access to detailed fee structures, leverage limits, and group configs
+## Types
 
-See `OPTIMIZATION_GUIDE.md` for detailed information.
+### TradeInput
+```typescript
+interface TradeInput {
+  pair: string;              // e.g., "BTC/USD"
+  isLong: boolean;           // true = long, false = short
+  collateralInTrade: number; // USDC collateral
+  leverage: number;          // Leverage multiplier
+  openPrice: number;         // Entry price (0 for market)
+  tp: number;                // Take profit (0 to disable)
+  sl: number;                // Stop loss (0 to disable)
+  referrer?: string;         // Referrer address
+  orderType: TradeInputOrderType;
+  maxSlippageP: number;      // Max slippage percentage
+}
+```
+
+### TradeInputOrderType
+```typescript
+enum TradeInputOrderType {
+  MARKET = 'market',
+  STOP_LIMIT = 'stop_limit',
+  LIMIT = 'limit',
+  MARKET_ZERO_FEE = 'market_zero_fee',
+}
+```
+
+### Snapshot
+Complete market state with all trading pairs, grouped by category, including OI, utilization, skew, fees, and depth.
+
+## Configuration
+
+Update contract addresses for your network:
+
+```typescript
+import { setContractAddresses } from 'avantis-trader-sdk';
+
+setContractAddresses({
+  TradingStorage: '0x...',
+  PairStorage: '0x...',
+  Trading: '0x...',
+  USDC: '0x...',
+  // ... other contracts
+});
+```
 
 ## Examples
 
-Check the `examples/` directory for complete examples:
+See the `/examples` directory for complete examples:
 
-- `trading-operations.ts` - Opening, closing, and managing trades
-- `delegation-and-referrals.ts` - Delegation and referral functionality
-- `advanced-queries.ts` - Market data queries and multicall
-- `optimized-snapshot.ts` - Efficient market data fetching
-- `basic-usage.ts` - Basic SDK usage
-- `kms-signer.ts` - AWS KMS integration
-- `price-feed.ts` - Real-time price feeds
+- `basic-usage.ts` - Basic trading operations
+- `price-feed.ts` - Real-time price feed integration
+- `kms-signer.ts` - AWS KMS signing
 
-## Error Handling
+## Development
 
-All contract interactions may throw errors. Always wrap in try-catch:
+```bash
+# Install dependencies
+npm install
 
-```typescript
-try {
-  const receipt = await client.tradingOps.openTrade(...);
-  console.log('Success:', receipt.hash);
-} catch (error) {
-  console.error('Trade failed:', error.message);
-}
+# Build
+npm run build
+
+# Run tests
+npm test
 ```
+
+## Requirements
+
+- Node.js 16+
+- TypeScript 5+
+
+## Dependencies
+
+- **ethers** - Ethereum interaction
+- **zod** - Data validation
+- **ws** - WebSocket client
+- **@aws-sdk/client-kms** - AWS KMS integration (optional)
+
+## Platform Information
+
+**Avantis** is a leveraged trading platform supporting:
+- Perpetual contracts on cryptocurrencies, forex, and commodities
+- Up to 100x leverage
+- USDC liquidity pool
+- Decentralized architecture
+
+## Resources
+
+- [Python SDK](https://github.com/Avantis-Labs/avantis_trader_sdk)
+- [Avantis Documentation](https://docs.avantisfi.com/)
+- [SDK Documentation](https://sdk.avantisfi.com/)
 
 ## License
 
 MIT
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## Security
+
+**Warning**: Never commit private keys or sensitive credentials. Use environment variables or secure key management systems like AWS KMS for production deployments.
+
+## Support
+
+For issues and questions:
+- GitHub Issues: [Report an issue](https://github.com/your-repo/issues)
+- Documentation: [SDK Documentation](https://sdk.avantisfi.com/)
